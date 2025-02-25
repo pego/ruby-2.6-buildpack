@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# Se trova un Gemfile, applica il buildpack
+if [ -f Gemfile ]; then
+  echo "custom-ruby-buildpack"
+  exit 0
+else
+  echo "no-gemfile"
+  exit 1
+fi

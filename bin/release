@@ -1,0 +1,9 @@
+#!/bin/sh
+
+cat <<EOF
+---
+config_vars:
+  RACK_ENV: production
+default_process_types:
+  web: bundle exec rails server -p \$PORT
+EOF
