@@ -3,9 +3,10 @@
 BUILD_DIR=$1
 CACHE_DIR=$2
 
-echo "Installing Ruby 2.7.8 with OpenSSL 3.0..."
+echo "Verifying OpenSSL version..."
+openssl version
 
-# Crea directory temporanea per la compilazione
+echo "Installing Ruby 2.7.8 with OpenSSL 3.0..."
 mkdir -p $BUILD_DIR/tmp_ruby_build
 cd $BUILD_DIR/tmp_ruby_build
 
@@ -13,8 +14,10 @@ cd $BUILD_DIR/tmp_ruby_build
 curl -o ruby.tar.gz https://cache.ruby-lang.org/pub/ruby/2.7/ruby-2.7.8.tar.gz
 tar -xzvf ruby.tar.gz --strip-components=1
 
-# Configura e compila Ruby
-./configure --prefix=$BUILD_DIR/.ruby --with-openssl-dir=/usr
+# Configura e compila Ruby con OpenSSL 3.0
+./configure --prefix=$BUILD_DIR/.ruby --with-openssl-dir=/usr \
+  --with-openssl --enable-shared
+
 make -j$(nproc) && make install
 
 # Verifica che Ruby sia stato installato
@@ -22,6 +25,9 @@ if [ ! -f "$BUILD_DIR/.ruby/bin/ruby" ]; then
   echo "Errore: Ruby non è stato installato correttamente!"
   exit 1
 fi
+
+# Verifica che Ruby riconosca OpenSSL
+$BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION'
 
 # Aggiungi Ruby al PATH
 mkdir -p $BUILD_DIR/.profile.d
