@@ -3,20 +3,15 @@
 BUILD_DIR=$1
 CACHE_DIR=$2
 
-echo "Installing Ruby version 2.7.8"
-
-# Crea una directory temporanea
+echo "Installing Ruby 2.7.8 with OpenSSL 3.0..."
 mkdir -p $BUILD_DIR/.ruby
-
-# Scarica Ruby
 curl -o ruby.tar.gz https://cache.ruby-lang.org/pub/ruby/2.7/ruby-2.7.8.tar.gz
+tar -xzvf ruby.tar.gz -C $BUILD_DIR/.ruby --strip-components=1
+cd $BUILD_DIR/.ruby
+./configure --prefix=$BUILD_DIR/.ruby --with-openssl-dir=/usr
+make -j$(nproc) && make install
 
-# Estrai e compila Ruby
-tar -xzvf ruby.tar.gz -C $BUILD_DIR/.ruby
-cd $BUILD_DIR/.ruby/ruby-2.7.8
-./configure --prefix=$BUILD_DIR/.ruby
-make && make install
-
+# Verifica che Ruby sia stato installato
 if [ ! -f "$BUILD_DIR/.ruby/bin/ruby" ]; then
   echo "Errore: Ruby non è stato installato correttamente!"
   exit 1
@@ -29,6 +24,6 @@ echo "export PATH=$BUILD_DIR/.ruby/bin:\$PATH" >> $BUILD_DIR/.profile.d/ruby.sh
 # Installa Bundler nella versione richiesta
 $BUILD_DIR/.ruby/bin/gem install bundler -v 2.4.21
 
-# Installa le gemme
+# Installa le gemme dell'app
 cd $BUILD_DIR
 $BUILD_DIR/.ruby/bin/bundle install --deployment --without development test
