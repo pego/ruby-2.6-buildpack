@@ -26,6 +26,9 @@ fi
 mkdir -p $BUILD_DIR/.profile.d
 echo "export PATH=$BUILD_DIR/.ruby/bin:\$PATH" >> $BUILD_DIR/.profile.d/ruby.sh
 
+# Installa Bundler nella versione richiesta
+$BUILD_DIR/.ruby/bin/gem install bundler -v 2.4.21
+
 # Installa le gemme
 cd $BUILD_DIR
 $BUILD_DIR/.ruby/bin/bundle install --deployment --without development test
