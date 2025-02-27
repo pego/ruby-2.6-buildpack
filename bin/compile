@@ -17,7 +17,13 @@ cd $BUILD_DIR/.ruby/ruby-2.6.10
 ./configure --prefix=$BUILD_DIR/.ruby
 make && make install
 
+if [ ! -f "$BUILD_DIR/.ruby/bin/ruby" ]; then
+  echo "Errore: Ruby non è stato installato correttamente!"
+  exit 1
+fi
+
 # Aggiungi Ruby al PATH
+mkdir -p $BUILD_DIR/.profile.d
 echo "export PATH=$BUILD_DIR/.ruby/bin:\$PATH" >> $BUILD_DIR/.profile.d/ruby.sh
 
 # Installa le gemme
