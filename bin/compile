@@ -9,7 +9,7 @@ echo "Installing Ruby version 2.7.8"
 mkdir -p $BUILD_DIR/.ruby
 
 # Scarica Ruby
-curl -o ruby.tar.gz https://cache.ruby-lang.org/pub/ruby/2.6/ruby-2.7.8.tar.gz
+curl -o ruby.tar.gz https://cache.ruby-lang.org/pub/ruby/2.7/ruby-2.7.8.tar.gz
 
 # Estrai e compila Ruby
 tar -xzvf ruby.tar.gz -C $BUILD_DIR/.ruby
