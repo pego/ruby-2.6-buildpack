@@ -17,36 +17,52 @@ cd $BUILD_DIR/tmp_ruby_build
 curl -o ruby.tar.gz https://cache.ruby-lang.org/pub/ruby/2.7/ruby-2.7.8.tar.gz
 tar -xzvf ruby.tar.gz --strip-components=1
 
-# Configura e compila Ruby con OpenSSL 3.0
+# Debug: Verifichiamo i file scaricati
+ls -l
+
+# Configura Ruby per usare OpenSSL 3.0.13
 ./configure --prefix=$BUILD_DIR/.ruby \
   --with-openssl-dir=/usr \
   LDFLAGS="-L/usr/lib -Wl,-rpath,/usr/lib" \
   CPPFLAGS="-I/usr/include"
 
-make -j$(nproc) && make install
+# Debug: Verifichare se la configurazione è andata a buon fine
+if [ $? -ne 0 ]; then
+  echo "Errore durante la configurazione di Ruby!"
+  exit 1
+fi
+
+# Compiliamo Ruby
+make -j$(nproc)
+if [ $? -ne 0 ]; then
+  echo "Errore durante la compilazione di Ruby!"
+  exit 1
+fi
+
+# Installiamo Ruby
+make install
+if [ $? -ne 0 ]; then
+  echo "Errore durante l'installazione di Ruby!"
+  exit 1
+fi
 
 # Verifica che Ruby sia stato installato
 if [ ! -f "$BUILD_DIR/.ruby/bin/ruby" ]; then
   echo "Errore: Ruby non è stato installato correttamente!"
+  ls -l $BUILD_DIR/.ruby
   exit 1
 fi
 
-# Forza la compilazione dell'estensione OpenSSL di Ruby
+# Debug: Controlliamo se Ruby è linkato a OpenSSL
+$BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION'
+
+# Forza la compilazione dell'estensione OpenSSL
 echo "Forcing OpenSSL extension compilation..."
 cd $BUILD_DIR/.ruby/lib/ruby/2.7.0/ext/openssl
 $BUILD_DIR/.ruby/bin/ruby extconf.rb
 make && make install
 
-# Controlla se Ruby ora riconosce OpenSSL
+# Debug finale
 $BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION'
 
-# Aggiungi Ruby al PATH
-mkdir -p $BUILD_DIR/.profile.d
-echo "export PATH=$BUILD_DIR/.ruby/bin:\$PATH" >> $BUILD_DIR/.profile.d/ruby.sh
-
-# Installa Bundler nella versione richiesta
-$BUILD_DIR/.ruby/bin/gem install bundler -v 2.4.21
-
-# Installa le gemme dell'app
-cd $BUILD_DIR
-$BUILD_DIR/.ruby/bin/bundle install --deployment --without development test
+echo "Ruby installation completed successfully!"
