@@ -17,52 +17,52 @@ cd $BUILD_DIR/tmp_ruby_build
 curl -o ruby.tar.gz https://cache.ruby-lang.org/pub/ruby/2.7/ruby-2.7.8.tar.gz
 tar -xzvf ruby.tar.gz --strip-components=1
 
-# Debug: Verifichiamo i file scaricati
+# Debug: Verifica che i file siano stati estratti correttamente
 ls -l
 
-# Configura Ruby per usare OpenSSL 3.0.13
+# Configura Ruby per usare OpenSSL 3.0
 ./configure --prefix=$BUILD_DIR/.ruby \
   --with-openssl-dir=/usr \
   LDFLAGS="-L/usr/lib -Wl,-rpath,/usr/lib" \
   CPPFLAGS="-I/usr/include"
 
-# Debug: Verifichare se la configurazione è andata a buon fine
+# Debug: Verifica che la configurazione sia andata a buon fine
 if [ $? -ne 0 ]; then
-  echo "Errore durante la configurazione di Ruby!"
+  echo "❌ Errore durante la configurazione di Ruby!"
   exit 1
 fi
 
 # Compiliamo Ruby
 make -j$(nproc)
 if [ $? -ne 0 ]; then
-  echo "Errore durante la compilazione di Ruby!"
+  echo "❌ Errore durante la compilazione di Ruby!"
   exit 1
 fi
 
 # Installiamo Ruby
 make install
 if [ $? -ne 0 ]; then
-  echo "Errore durante l'installazione di Ruby!"
+  echo "❌ Errore durante l'installazione di Ruby!"
   exit 1
 fi
 
-# Verifica che Ruby sia stato installato
+# Debug: Controlla se il binario di Ruby è stato creato
 if [ ! -f "$BUILD_DIR/.ruby/bin/ruby" ]; then
-  echo "Errore: Ruby non è stato installato correttamente!"
+  echo "❌ Errore: Ruby non è stato installato correttamente!"
   ls -l $BUILD_DIR/.ruby
   exit 1
 fi
 
 # Debug: Controlliamo se Ruby è linkato a OpenSSL
-$BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION'
+$BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION' || echo "⚠️ OpenSSL non trovato in Ruby!"
 
 # Forza la compilazione dell'estensione OpenSSL
-echo "Forcing OpenSSL extension compilation..."
+echo "🔧 Forzando la compilazione dell'estensione OpenSSL..."
 cd $BUILD_DIR/.ruby/lib/ruby/2.7.0/ext/openssl
 $BUILD_DIR/.ruby/bin/ruby extconf.rb
 make && make install
 
 # Debug finale
-$BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION'
+$BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION' || echo "⚠️ OpenSSL non trovato in Ruby!"
 
-echo "Ruby installation completed successfully!"
+echo "✅ Ruby installation completed successfully!"
