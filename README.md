@@ -11,7 +11,7 @@ Questo buildpack personalizzato consente di usare versioni di Ruby non ufficialm
 
 2. Specifica la versione di Ruby nel tuo `Gemfile`:
    ```ruby
-   ruby '2.6.10'
+   ruby '2.7.8'
    ```
 
 3. Effettua il deploy:

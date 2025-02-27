@@ -3,17 +3,17 @@
 BUILD_DIR=$1
 CACHE_DIR=$2
 
-echo "Installing Ruby version 2.6.10"
+echo "Installing Ruby version 2.7.8"
 
 # Crea una directory temporanea
 mkdir -p $BUILD_DIR/.ruby
 
 # Scarica Ruby
-curl -o ruby.tar.gz https://cache.ruby-lang.org/pub/ruby/2.6/ruby-2.6.10.tar.gz
+curl -o ruby.tar.gz https://cache.ruby-lang.org/pub/ruby/2.6/ruby-2.7.8.tar.gz
 
 # Estrai e compila Ruby
 tar -xzvf ruby.tar.gz -C $BUILD_DIR/.ruby
-cd $BUILD_DIR/.ruby/ruby-2.6.10
+cd $BUILD_DIR/.ruby/ruby-2.7.8
 ./configure --prefix=$BUILD_DIR/.ruby
 make && make install
 
