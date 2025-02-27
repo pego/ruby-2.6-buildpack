@@ -4,10 +4,16 @@ BUILD_DIR=$1
 CACHE_DIR=$2
 
 echo "Installing Ruby 2.7.8 with OpenSSL 3.0..."
-mkdir -p $BUILD_DIR/.ruby
+
+# Crea directory temporanea per la compilazione
+mkdir -p $BUILD_DIR/tmp_ruby_build
+cd $BUILD_DIR/tmp_ruby_build
+
+# Scarica e decomprime Ruby
 curl -o ruby.tar.gz https://cache.ruby-lang.org/pub/ruby/2.7/ruby-2.7.8.tar.gz
-tar -xzvf ruby.tar.gz -C $BUILD_DIR/.ruby --strip-components=1
-cd $BUILD_DIR/.ruby
+tar -xzvf ruby.tar.gz --strip-components=1
+
+# Configura e compila Ruby
 ./configure --prefix=$BUILD_DIR/.ruby --with-openssl-dir=/usr
 make -j$(nproc) && make install
 
