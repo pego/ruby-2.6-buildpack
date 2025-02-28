@@ -23,13 +23,15 @@ tar -xzvf ruby.tar.gz --strip-components=1
 # Debug: Verifica che i file siano stati estratti correttamente
 ls -l
 
-# Configura Ruby per usare OpenSSL 3.0
+# Configura Ruby forzando i percorsi OpenSSL
 echo "Configuring Ruby with OpenSSL..."
 ./configure --prefix=$BUILD_DIR/.ruby \
   --with-openssl-dir=/usr \
   --enable-shared \
   LDFLAGS="-L/usr/lib -Wl,-rpath,/usr/lib" \
-  CPPFLAGS="-I/usr/include"
+  CPPFLAGS="-I/usr/include" \
+  OPENSSL_CFLAGS="-I/usr/include" \
+  OPENSSL_LIBS="-L/usr/lib -lssl -lcrypto"
 
 # Debug: Verifica se la configurazione è andata a buon fine
 if [ $? -ne 0 ]; then
