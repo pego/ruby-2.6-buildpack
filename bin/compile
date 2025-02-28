@@ -3,82 +3,87 @@
 BUILD_DIR=$1
 CACHE_DIR=$2
 
-echo "Setting up environment variables for OpenSSL..."
+echo "🔧 Setting up environment variables..."
 export PATH="/usr/bin:$PATH"
 export LDFLAGS="-L/usr/lib -Wl,-rpath,/usr/lib"
 export CPPFLAGS="-I/usr/include"
 export PKG_CONFIG_PATH="/usr/lib/pkgconfig"
 
-echo "Checking OpenSSL version on Heroku..."
-openssl version -a || echo "⚠️ OpenSSL not found!"
+echo "📦 Installing OpenSSL 1.1.1..."
+apt-get update && apt-get install -y \
+  libssl1.1 \
+  libssl-dev \
+  libreadline-dev \
+  zlib1g-dev \
+  libyaml-dev \
+  libffi-dev \
+  libgdbm-dev \
+  libncurses5-dev \
+  libgmp-dev
 
-echo "Installing Ruby 2.7.8 with OpenSSL 3.0.13..."
+echo "🔍 Checking OpenSSL version..."
+openssl version -a
+
+echo "🔧 Installing Ruby 2.6.10 with OpenSSL 1.1.1..."
 mkdir -p $BUILD_DIR/tmp_ruby_build
 cd $BUILD_DIR/tmp_ruby_build
 
-# Scarica e decomprime Ruby
-curl -o ruby.tar.gz https://cache.ruby-lang.org/pub/ruby/2.7/ruby-2.7.8.tar.gz
+# Scarica e decomprime Ruby 2.6.10
+curl -o ruby.tar.gz https://cache.ruby-lang.org/pub/ruby/2.6/ruby-2.6.10.tar.gz
 tar -xzvf ruby.tar.gz --strip-components=1
 
-# Debug: Verifica che i file siano stati estratti correttamente
-ls -l
-
-# Configura Ruby forzando i percorsi OpenSSL
-echo "Configuring Ruby with OpenSSL..."
+# Configura Ruby per usare OpenSSL 1.1.1
+echo "⚙️ Configuring Ruby..."
 ./configure --prefix=$BUILD_DIR/.ruby \
   --with-openssl-dir=/usr \
   --enable-shared \
   LDFLAGS="-L/usr/lib -Wl,-rpath,/usr/lib" \
   CPPFLAGS="-I/usr/include" \
   OPENSSL_CFLAGS="-I/usr/include" \
-  OPENSSL_LIBS="-L/usr/lib -lssl -lcrypto" \
-  2>&1 | tee $BUILD_DIR/config.log
+  OPENSSL_LIBS="-L/usr/lib -lssl -lcrypto"
 
-# Verifica se la configurazione è andata a buon fine
 if [ $? -ne 0 ]; then
   echo "❌ Errore durante la configurazione di Ruby!"
-  echo "Ultime 20 righe di config.log:"
-  tail -n 20 $BUILD_DIR/config.log
   exit 1
 fi
 
-# Compiliamo Ruby
-echo "Compiling Ruby..."
-make -j$(nproc) 2>&1 | tee $BUILD_DIR/make.log
+# Compilazione
+echo "🛠️ Compiling Ruby..."
+make -j$(nproc)
+
 if [ $? -ne 0 ]; then
   echo "❌ Errore durante la compilazione di Ruby!"
-  echo "Ultime 20 righe di make.log:"
-  tail -n 20 $BUILD_DIR/make.log
   exit 1
 fi
 
-# Installiamo Ruby
-echo "Installing Ruby..."
+# Installazione
+echo "📦 Installing Ruby..."
 make install
+
 if [ $? -ne 0 ]; then
   echo "❌ Errore durante l'installazione di Ruby!"
   exit 1
 fi
 
-# Debug: Controlla se il binario di Ruby è stato creato
+# Debug: Verifica che Ruby sia stato installato
 if [ ! -f "$BUILD_DIR/.ruby/bin/ruby" ]; then
   echo "❌ Errore: Ruby non è stato installato correttamente!"
   ls -l $BUILD_DIR/.ruby
   exit 1
 fi
 
-# Debug: Controlliamo se Ruby è linkato a OpenSSL
-echo "Verifying OpenSSL support in Ruby..."
-$BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION' || echo "⚠️ OpenSSL non trovato in Ruby!"
+# Verifica se Ruby riconosce OpenSSL
+echo "🔍 Checking OpenSSL in Ruby..."
+$BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION'
 
 # Forza la compilazione dell'estensione OpenSSL
-echo "🔧 Forzando la compilazione dell'estensione OpenSSL..."
-cd $BUILD_DIR/.ruby/lib/ruby/2.7.0/ext/openssl
+echo "🔧 Forcing OpenSSL extension compilation..."
+cd $BUILD_DIR/.ruby/lib/ruby/2.6.0/ext/openssl
 $BUILD_DIR/.ruby/bin/ruby extconf.rb
 make && make install
 
 # Debug finale
-echo "Verifying OpenSSL support after installation..."
-$BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION'" || echo "⚠️ OpenSSL non trovato in Ruby!"
+echo "✅ Verifying OpenSSL support after installation..."
+$BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION'
 
-echo "✅ Ruby installation completed successfully!"
+echo "🚀 Ruby 2.6.10 installed successfully with OpenSSL 1.1.1!"
