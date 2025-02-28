@@ -31,20 +31,24 @@ echo "Configuring Ruby with OpenSSL..."
   LDFLAGS="-L/usr/lib -Wl,-rpath,/usr/lib" \
   CPPFLAGS="-I/usr/include" \
   OPENSSL_CFLAGS="-I/usr/include" \
-  OPENSSL_LIBS="-L/usr/lib -lssl -lcrypto"
+  OPENSSL_LIBS="-L/usr/lib -lssl -lcrypto" \
+  2>&1 | tee $BUILD_DIR/config.log
 
-# Debug: Verifica se la configurazione è andata a buon fine
+# Verifica se la configurazione è andata a buon fine
 if [ $? -ne 0 ]; then
   echo "❌ Errore durante la configurazione di Ruby!"
-  cat config.log | grep -i openssl || echo "⚠️ OpenSSL not found in config.log!"
+  echo "Ultime 20 righe di config.log:"
+  tail -n 20 $BUILD_DIR/config.log
   exit 1
 fi
 
 # Compiliamo Ruby
 echo "Compiling Ruby..."
-make -j$(nproc)
+make -j$(nproc) 2>&1 | tee $BUILD_DIR/make.log
 if [ $? -ne 0 ]; then
   echo "❌ Errore durante la compilazione di Ruby!"
+  echo "Ultime 20 righe di make.log:"
+  tail -n 20 $BUILD_DIR/make.log
   exit 1
 fi
 
@@ -75,6 +79,6 @@ make && make install
 
 # Debug finale
 echo "Verifying OpenSSL support after installation..."
-$BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION' || echo "⚠️ OpenSSL non trovato in Ruby!"
+$BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION'" || echo "⚠️ OpenSSL non trovato in Ruby!"
 
 echo "✅ Ruby installation completed successfully!"
