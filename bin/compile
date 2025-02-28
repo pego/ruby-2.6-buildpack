@@ -12,17 +12,11 @@ export PKG_CONFIG_PATH="/usr/lib/pkgconfig"
 echo "📦 Installing OpenSSL 1.1.1..."
 apt-get update && apt-get install -y \
   libssl1.1 \
-  libssl-dev \
-  libreadline-dev \
-  zlib1g-dev \
-  libyaml-dev \
-  libffi-dev \
-  libgdbm-dev \
-  libncurses5-dev \
-  libgmp-dev
+  libssl-dev
 
+# Debug: Verifica che OpenSSL 1.1.1 sia installato
 echo "🔍 Checking OpenSSL version..."
-openssl version -a
+openssl version -a || echo "⚠️ OpenSSL not found!"
 
 echo "🔧 Installing Ruby 2.6.10 with OpenSSL 1.1.1..."
 mkdir -p $BUILD_DIR/tmp_ruby_build
