@@ -5,9 +5,12 @@ CACHE_DIR=$2
 
 echo "Setting up environment variables for OpenSSL..."
 export PATH="/usr/bin:$PATH"
-export LDFLAGS="-L/usr/lib"
+export LDFLAGS="-L/usr/lib -Wl,-rpath,/usr/lib"
 export CPPFLAGS="-I/usr/include"
 export PKG_CONFIG_PATH="/usr/lib/pkgconfig"
+
+echo "Checking OpenSSL version on Heroku..."
+openssl version -a || echo "⚠️ OpenSSL not found!"
 
 echo "Installing Ruby 2.7.8 with OpenSSL 3.0.13..."
 mkdir -p $BUILD_DIR/tmp_ruby_build
@@ -21,18 +24,22 @@ tar -xzvf ruby.tar.gz --strip-components=1
 ls -l
 
 # Configura Ruby per usare OpenSSL 3.0
+echo "Configuring Ruby with OpenSSL..."
 ./configure --prefix=$BUILD_DIR/.ruby \
   --with-openssl-dir=/usr \
+  --enable-shared \
   LDFLAGS="-L/usr/lib -Wl,-rpath,/usr/lib" \
   CPPFLAGS="-I/usr/include"
 
-# Debug: Verifica che la configurazione sia andata a buon fine
+# Debug: Verifica se la configurazione è andata a buon fine
 if [ $? -ne 0 ]; then
   echo "❌ Errore durante la configurazione di Ruby!"
+  cat config.log | grep -i openssl || echo "⚠️ OpenSSL not found in config.log!"
   exit 1
 fi
 
 # Compiliamo Ruby
+echo "Compiling Ruby..."
 make -j$(nproc)
 if [ $? -ne 0 ]; then
   echo "❌ Errore durante la compilazione di Ruby!"
@@ -40,6 +47,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Installiamo Ruby
+echo "Installing Ruby..."
 make install
 if [ $? -ne 0 ]; then
   echo "❌ Errore durante l'installazione di Ruby!"
@@ -54,6 +62,7 @@ if [ ! -f "$BUILD_DIR/.ruby/bin/ruby" ]; then
 fi
 
 # Debug: Controlliamo se Ruby è linkato a OpenSSL
+echo "Verifying OpenSSL support in Ruby..."
 $BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION' || echo "⚠️ OpenSSL non trovato in Ruby!"
 
 # Forza la compilazione dell'estensione OpenSSL
@@ -63,6 +72,7 @@ $BUILD_DIR/.ruby/bin/ruby extconf.rb
 make && make install
 
 # Debug finale
+echo "Verifying OpenSSL support after installation..."
 $BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION' || echo "⚠️ OpenSSL non trovato in Ruby!"
 
 echo "✅ Ruby installation completed successfully!"
