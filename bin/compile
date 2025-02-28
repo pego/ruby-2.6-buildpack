@@ -13,9 +13,23 @@ echo "📦 Downloading and installing OpenSSL 1.1.1..."
 mkdir -p $BUILD_DIR/.openssl
 cd $BUILD_DIR/.openssl
 
-# Scarica OpenSSL 1.1.1
-curl -O https://www.openssl.org/source/openssl-1.1.1w.tar.gz
-tar -xzf openssl-1.1.1w.tar.gz --strip-components=1
+# Scarica OpenSSL 1.1.1w da GitHub invece di ftp.openssl.org
+curl -L -o openssl.tar.gz https://github.com/openssl/openssl/releases/download/OpenSSL_1_1_1w/openssl-1.1.1w.tar.gz
+
+# Verifica che il file sia stato scaricato correttamente
+if [ ! -f "openssl.tar.gz" ]; then
+  echo "❌ Errore: il download di OpenSSL 1.1.1 è fallito!"
+  exit 1
+fi
+
+# Estrai OpenSSL
+tar -xzf openssl.tar.gz --strip-components=1
+
+# Verifica che il codice sorgente sia stato estratto
+if [ ! -f "config" ]; then
+  echo "❌ Errore: l'estrazione di OpenSSL 1.1.1 è fallita!"
+  exit 1
+fi
 
 # Compila e installa OpenSSL
 ./config --prefix=$BUILD_DIR/.openssl --openssldir=$BUILD_DIR/.openssl shared zlib
