@@ -1,3 +1,5 @@
-#!/bin/sh
-echo "custom-ruby-buildpack"
+#!/bin/bash
+
+# Basic detection - always return success as this is a specific purpose buildpack
+echo "ruby-2.6.10-buildpack"
 exit 0
