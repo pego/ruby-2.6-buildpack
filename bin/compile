@@ -1,11 +1,19 @@
 #!/bin/bash
-set -e  # Exit immediately if a command exits with a non-zero status
+
+# Print commands for debugging
+set -x
+# Exit immediately if a command exits with a non-zero status
+set -e
 
 BUILD_DIR=$1
 CACHE_DIR=$2
 ENV_DIR=$3
 
 echo "🚀 Starting Ruby 2.6.10 buildpack installation..."
+
+# Make sure we don't fail due to locale issues
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
 
 echo "🔧 Setting up environment variables..."
 export PATH="/usr/bin:$PATH"
@@ -37,10 +45,14 @@ if [ ! -f "config" ]; then
   exit 1
 fi
 
+# Clean the destination directory first to avoid conflicts
+rm -rf $BUILD_DIR/.openssl/include
+rm -rf $BUILD_DIR/.openssl/lib
+
 # Compile and install OpenSSL
 ./config --prefix=$BUILD_DIR/.openssl --openssldir=$BUILD_DIR/.openssl shared zlib
 make -j$(nproc)
-make install
+make install_sw
 
 # Debug: Verify the version of OpenSSL just installed
 $BUILD_DIR/.openssl/bin/openssl version -a || echo "❌ OpenSSL 1.1.1 installation failed!"
@@ -58,27 +70,35 @@ export PKG_CONFIG_PATH="$BUILD_DIR/.openssl/lib/pkgconfig:$PKG_CONFIG_PATH"
 ls -la $BUILD_DIR/.openssl/lib/
 
 echo "🔧 Installing Ruby 2.6.10 with OpenSSL 1.1.1..."
-mkdir -p $BUILD_DIR/tmp_ruby_build
+
+# Clean the ruby build directory if it exists from a previous run
+if [ -d "$BUILD_DIR/tmp_ruby_build" ]; then
+  rm -rf "$BUILD_DIR/tmp_ruby_build"
+fi
+mkdir -p "$BUILD_DIR/tmp_ruby_build"
 cd $BUILD_DIR/tmp_ruby_build
 
 # Download Ruby 2.6.10
-curl -o ruby.tar.gz https://cache.ruby-lang.org/pub/ruby/2.6/ruby-2.6.10.tar.gz
-tar -xzvf ruby.tar.gz --strip-components=1
+curl -L -o ruby.tar.gz https://cache.ruby-lang.org/pub/ruby/2.6/ruby-2.6.10.tar.gz
+tar -xzf ruby.tar.gz --strip-components=1
 
 # Configure Ruby to use the newly installed OpenSSL 1.1.1
 ./configure --prefix=$BUILD_DIR/.ruby \
   --with-openssl-dir=$BUILD_DIR/.openssl \
   --enable-shared \
   --disable-install-doc \
+  --with-out-ext=fiddle \
   LDFLAGS="-L$BUILD_DIR/.openssl/lib -Wl,-rpath,$BUILD_DIR/.openssl/lib" \
   CPPFLAGS="-I$BUILD_DIR/.openssl/include" \
-  PKG_CONFIG_PATH="$BUILD_DIR/.openssl/lib/pkgconfig:$PKG_CONFIG_PATH"
+  PKG_CONFIG_PATH="$BUILD_DIR/.openssl/lib/pkgconfig:$PKG_CONFIG_PATH" \
+  OPENSSL_CFLAGS="-I$BUILD_DIR/.openssl/include" \
+  OPENSSL_LIBS="-L$BUILD_DIR/.openssl/lib -lssl -lcrypto"
 
 # Verify the configure output for OpenSSL detection
 grep -A 5 "OpenSSL" config.log || echo "OpenSSL not properly detected in configuration"
 
-# Compilation
-make -j$(nproc)
+# Compilation with verbose output for debugging
+make V=1 -j$(nproc) || make V=1
 make install
 
 # Verify that Ruby has been installed correctly
@@ -117,8 +137,15 @@ export PATH="$HOME/bin:$HOME/.ruby/bin:\$PATH"
 export LD_LIBRARY_PATH="$HOME/.openssl/lib:\$LD_LIBRARY_PATH"
 export LIBRARY_PATH="$HOME/.openssl/lib:\$LIBRARY_PATH"
 export CPATH="$HOME/.openssl/include:\$CPATH"
+export SSL_CERT_FILE="$HOME/.openssl/ssl/cert.pem"
+export GEM_HOME="$HOME/.gem/ruby/2.6.0"
+export GEM_PATH="$HOME/.gem/ruby/2.6.0:\$GEM_PATH"
 EOF
 chmod +x $BUILD_DIR/.profile.d/ruby.sh
+
+# Create a symlink from the system's CA certificates to our OpenSSL directory
+mkdir -p $BUILD_DIR/.openssl/ssl
+ln -sf /etc/ssl/certs/ca-certificates.crt $BUILD_DIR/.openssl/ssl/cert.pem
 
 # Cleanup to reduce slug size
 cd $BUILD_DIR
