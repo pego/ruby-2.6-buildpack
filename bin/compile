@@ -1,78 +1,127 @@
-#!/bin/sh
+#!/bin/bash
+set -e  # Exit immediately if a command exits with a non-zero status
 
 BUILD_DIR=$1
 CACHE_DIR=$2
+ENV_DIR=$3
+
+echo "🚀 Starting Ruby 2.6.10 buildpack installation..."
 
 echo "🔧 Setting up environment variables..."
 export PATH="/usr/bin:$PATH"
 export LDFLAGS="-L/usr/lib -Wl,-rpath,/usr/lib"
 export CPPFLAGS="-I/usr/include"
 export PKG_CONFIG_PATH="/usr/lib/pkgconfig"
+# Ensure library paths are properly set
+export LD_LIBRARY_PATH="/usr/lib:$LD_LIBRARY_PATH"
 
 echo "📦 Downloading and installing OpenSSL 1.1.1..."
 mkdir -p $BUILD_DIR/.openssl
 cd $BUILD_DIR/.openssl
 
-# Scarica OpenSSL 1.1.1w da GitHub invece di ftp.openssl.org
+# Download OpenSSL 1.1.1w from GitHub instead of ftp.openssl.org
 curl -L -o openssl.tar.gz https://github.com/openssl/openssl/releases/download/OpenSSL_1_1_1w/openssl-1.1.1w.tar.gz
 
-# Verifica che il file sia stato scaricato correttamente
+# Verify that the file has been downloaded correctly
 if [ ! -f "openssl.tar.gz" ]; then
-  echo "❌ Errore: il download di OpenSSL 1.1.1 è fallito!"
+  echo "❌ Error: OpenSSL 1.1.1 download failed!"
   exit 1
 fi
 
-# Estrai OpenSSL
+# Extract OpenSSL
 tar -xzf openssl.tar.gz --strip-components=1
 
-# Verifica che il codice sorgente sia stato estratto
+# Verify that the source code has been extracted
 if [ ! -f "config" ]; then
-  echo "❌ Errore: l'estrazione di OpenSSL 1.1.1 è fallita!"
+  echo "❌ Error: OpenSSL 1.1.1 extraction failed!"
   exit 1
 fi
 
-# Compila e installa OpenSSL
+# Compile and install OpenSSL
 ./config --prefix=$BUILD_DIR/.openssl --openssldir=$BUILD_DIR/.openssl shared zlib
 make -j$(nproc)
 make install
 
-# Debug: Verifica la versione di OpenSSL appena installata
+# Debug: Verify the version of OpenSSL just installed
 $BUILD_DIR/.openssl/bin/openssl version -a || echo "❌ OpenSSL 1.1.1 installation failed!"
 
-# Aggiorna le variabili per far usare questa versione di OpenSSL
+# Update variables to use this version of OpenSSL
 export PATH="$BUILD_DIR/.openssl/bin:$PATH"
-export LDFLAGS="-L$BUILD_DIR/.openssl/lib"
+export LDFLAGS="-L$BUILD_DIR/.openssl/lib -Wl,-rpath,$BUILD_DIR/.openssl/lib"
 export CPPFLAGS="-I$BUILD_DIR/.openssl/include"
 export OPENSSL_CFLAGS="-I$BUILD_DIR/.openssl/include"
 export OPENSSL_LIBS="-L$BUILD_DIR/.openssl/lib -lssl -lcrypto"
+export LD_LIBRARY_PATH="$BUILD_DIR/.openssl/lib:$LD_LIBRARY_PATH"
+export PKG_CONFIG_PATH="$BUILD_DIR/.openssl/lib/pkgconfig:$PKG_CONFIG_PATH"
+
+# Verify OpenSSL libraries
+ls -la $BUILD_DIR/.openssl/lib/
 
 echo "🔧 Installing Ruby 2.6.10 with OpenSSL 1.1.1..."
 mkdir -p $BUILD_DIR/tmp_ruby_build
 cd $BUILD_DIR/tmp_ruby_build
 
-# Scarica Ruby 2.6.10
+# Download Ruby 2.6.10
 curl -o ruby.tar.gz https://cache.ruby-lang.org/pub/ruby/2.6/ruby-2.6.10.tar.gz
 tar -xzvf ruby.tar.gz --strip-components=1
 
-# Configura Ruby per usare OpenSSL 1.1.1 appena installato
+# Configure Ruby to use the newly installed OpenSSL 1.1.1
 ./configure --prefix=$BUILD_DIR/.ruby \
   --with-openssl-dir=$BUILD_DIR/.openssl \
   --enable-shared \
+  --disable-install-doc \
   LDFLAGS="-L$BUILD_DIR/.openssl/lib -Wl,-rpath,$BUILD_DIR/.openssl/lib" \
-  CPPFLAGS="-I$BUILD_DIR/.openssl/include"
+  CPPFLAGS="-I$BUILD_DIR/.openssl/include" \
+  PKG_CONFIG_PATH="$BUILD_DIR/.openssl/lib/pkgconfig:$PKG_CONFIG_PATH"
 
-# Compilazione
+# Verify the configure output for OpenSSL detection
+grep -A 5 "OpenSSL" config.log || echo "OpenSSL not properly detected in configuration"
+
+# Compilation
 make -j$(nproc)
 make install
 
-# Verifica che Ruby sia stato installato correttamente
+# Verify that Ruby has been installed correctly
 if [ ! -f "$BUILD_DIR/.ruby/bin/ruby" ]; then
-  echo "❌ Errore: Ruby non è stato installato correttamente!"
+  echo "❌ Error: Ruby was not installed correctly!"
   ls -l $BUILD_DIR/.ruby
   exit 1
 fi
 
-# Debug: Controlla se Ruby riconosce OpenSSL 1.1.1
-$BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_VERSION'
+# Debug: Check if Ruby recognizes OpenSSL 1.1.1
+$BUILD_DIR/.ruby/bin/ruby -v
+$BUILD_DIR/.ruby/bin/ruby -ropenssl -e 'puts "OpenSSL Version: #{OpenSSL::OPENSSL_VERSION}"; puts "OpenSSL Library Version: #{OpenSSL::OPENSSL_LIBRARY_VERSION}"' || echo "❌ Ruby cannot load OpenSSL correctly"
+
+# Create bin directory and setup paths
+mkdir -p $BUILD_DIR/bin
+cat > $BUILD_DIR/bin/ruby <<EOF
+#!/bin/bash
+export LD_LIBRARY_PATH="$BUILD_DIR/.openssl/lib:\$LD_LIBRARY_PATH"
+exec $BUILD_DIR/.ruby/bin/ruby "\$@"
+EOF
+chmod +x $BUILD_DIR/bin/ruby
+
+# Setup bundle executable with correct paths
+cat > $BUILD_DIR/bin/bundle <<EOF
+#!/bin/bash
+export LD_LIBRARY_PATH="$BUILD_DIR/.openssl/lib:\$LD_LIBRARY_PATH"
+exec $BUILD_DIR/.ruby/bin/bundle "\$@"
+EOF
+chmod +x $BUILD_DIR/bin/bundle
+
+# Setup for Heroku environment - create profile.d script to ensure correct paths
+mkdir -p $BUILD_DIR/.profile.d
+cat > $BUILD_DIR/.profile.d/ruby.sh <<EOF
+#!/bin/bash
+export PATH="$HOME/bin:$HOME/.ruby/bin:\$PATH"
+export LD_LIBRARY_PATH="$HOME/.openssl/lib:\$LD_LIBRARY_PATH"
+export LIBRARY_PATH="$HOME/.openssl/lib:\$LIBRARY_PATH"
+export CPATH="$HOME/.openssl/include:\$CPATH"
+EOF
+chmod +x $BUILD_DIR/.profile.d/ruby.sh
+
+# Cleanup to reduce slug size
+cd $BUILD_DIR
+rm -rf tmp_ruby_build
 
 echo "✅ Ruby 2.6.10 installed successfully with OpenSSL 1.1.1!"
