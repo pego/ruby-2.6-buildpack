@@ -128,13 +128,65 @@ chmod +x $BUILD_DIR/.profile.d/ruby.sh
 echo "-----> Installing Bundler (compatible with Ruby 2.6)"
 $BUILD_DIR/.heroku/ruby/bin/gem install bundler -v 2.3.26 --no-document
 
-# Create binstub for bundler
-cat > $BUILD_DIR/bin/bundler <<BUNDLEREOF
+# Verify bundle executable exists
+if [ ! -f "$BUILD_DIR/.heroku/ruby/bin/bundle" ]; then
+  echo "-----> Creating bundle executable"
+  ln -sf "$BUILD_DIR/.heroku/ruby/bin/bundler" "$BUILD_DIR/.heroku/ruby/bin/bundle"
+fi
+
+# Create wrappers for bundler
+cat > $BUILD_DIR/bin/bundler <<'BUNDLEREOF'
 #!/bin/bash
-export LD_LIBRARY_PATH=\$HOME/.heroku/vendor/lib:\$LD_LIBRARY_PATH
-exec \$HOME/.heroku/ruby/bin/bundler "\$@"
+# Direct path to Bundler executable
+export LD_LIBRARY_PATH="$HOME/.heroku/vendor/lib:$LD_LIBRARY_PATH"
+export GEM_PATH="$HOME/.heroku/ruby/lib/ruby/gems/2.6.0:$HOME/.gem/ruby/2.6.0"
+export PATH="$HOME/.heroku/ruby/bin:$PATH"
+
+# Try multiple paths for bundler
+if [ -x "$HOME/.heroku/ruby/bin/bundler" ]; then
+  exec "$HOME/.heroku/ruby/bin/bundler" "$@"
+else
+  # Last resort - find bundler in the Ruby gems
+  BUNDLER_PATH=$(find $HOME/.heroku/ruby -name bundler -type f -executable | head -1)
+  if [ -n "$BUNDLER_PATH" ]; then
+    exec "$BUNDLER_PATH" "$@"
+  else
+    echo "Error: Could not find bundler executable"
+    exit 1
+  fi
+fi
 BUNDLEREOF
 chmod +x $BUILD_DIR/bin/bundler
+
+cat > $BUILD_DIR/bin/bundle <<'BUNDLEEOF'
+#!/bin/bash
+# Direct path to Bundler executable
+export LD_LIBRARY_PATH="$HOME/.heroku/vendor/lib:$LD_LIBRARY_PATH"
+export GEM_PATH="$HOME/.heroku/ruby/lib/ruby/gems/2.6.0:$HOME/.gem/ruby/2.6.0"
+export PATH="$HOME/.heroku/ruby/bin:$PATH"
+
+# Debug - show what we're running
+echo "Running bundle from $(dirname $0) with args: $@"
+echo "PATH: $PATH"
+echo "Current directory: $(pwd)"
+
+# Try multiple paths for bundle
+if [ -x "$HOME/.heroku/ruby/bin/bundle" ]; then
+  exec "$HOME/.heroku/ruby/bin/bundle" "$@"
+elif [ -x "$HOME/.heroku/ruby/bin/bundler" ]; then
+  exec "$HOME/.heroku/ruby/bin/bundler" "$@"
+else
+  # Last resort - find bundler in the Ruby gems
+  BUNDLER_PATH=$(find $HOME/.heroku/ruby -name bundler -type f -executable | head -1)
+  if [ -n "$BUNDLER_PATH" ]; then
+    exec "$BUNDLER_PATH" "$@"
+  else
+    echo "Error: Could not find bundle or bundler executable"
+    exit 1
+  fi
+fi
+BUNDLEEOF
+chmod +x $BUILD_DIR/bin/bundle
 
 # Setup Rubygems to use installed bundler by default
 mkdir -p $BUILD_DIR/.bundle
@@ -145,10 +197,28 @@ BUNDLE_BIN: vendor/bundle/bin
 BUNDLE_PATH: vendor/bundle
 BUNDLECONFIGEOF
 
+echo "-----> Showing bundle location"
+ls -la $BUILD_DIR/.heroku/ruby/bin/bundle* || echo "Bundle not found in expected location"
+ls -la $BUILD_DIR/bin/bundle* || echo "Bundle wrappers not found"
+
 # Verify installation
 echo "-----> Verifying installation"
 $BUILD_DIR/.heroku/ruby/bin/ruby -v
 $BUILD_DIR/.heroku/ruby/bin/ruby -ropenssl -e 'puts "OpenSSL version: #{OpenSSL::OPENSSL_VERSION}"'
+
+# Install Rails app dependencies if there's a Gemfile
+if [ -f "$BUILD_DIR/Gemfile" ]; then
+  echo "-----> Installing dependencies with Bundler"
+  cd $BUILD_DIR
+  $BUILD_DIR/bin/bundle install --without development:test --path vendor/bundle --binstubs vendor/bundle/bin
+  
+  # Ensure proper permissions
+  chmod -R +x $BUILD_DIR/vendor/bundle/bin || true
+  
+  # Create necessary Rails files if not present
+  mkdir -p $BUILD_DIR/tmp/pids $BUILD_DIR/tmp/cache $BUILD_DIR/tmp/sockets $BUILD_DIR/log
+  touch $BUILD_DIR/log/production.log
+fi
 
 # Clean up build artifacts to reduce slug size
 echo "-----> Cleaning up build artifacts"

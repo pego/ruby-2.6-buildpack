@@ -3,5 +3,5 @@
 cat <<EOF
 ---
 default_process_types:
-  web: bundle exec puma -p \$PORT
+  web: bin/bundle exec puma -p \$PORT
 EOF
