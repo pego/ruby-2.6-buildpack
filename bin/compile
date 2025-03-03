@@ -137,54 +137,107 @@ fi
 # Create wrappers for bundler
 cat > $BUILD_DIR/bin/bundler <<'BUNDLEREOF'
 #!/bin/bash
-# Direct path to Bundler executable
-export LD_LIBRARY_PATH="$HOME/.heroku/vendor/lib:$LD_LIBRARY_PATH"
-export GEM_PATH="$HOME/.heroku/ruby/lib/ruby/gems/2.6.0:$HOME/.gem/ruby/2.6.0"
-export PATH="$HOME/.heroku/ruby/bin:$PATH"
+# Direct path to Bundler executable - use both build-time and runtime paths
 
-# Try multiple paths for bundler
-if [ -x "$HOME/.heroku/ruby/bin/bundler" ]; then
-  exec "$HOME/.heroku/ruby/bin/bundler" "$@"
+# Debug - show what we're running
+echo "Running bundler from $(dirname $0) with args: $@"
+echo "PATH: $PATH"
+echo "Current directory: $(pwd)"
+
+# During build, we're in /tmp/build_xxx
+if [[ "$PWD" == "/tmp/build_"* ]]; then
+  # We're in build mode
+  if [ -x "$PWD/.heroku/ruby/bin/bundler" ]; then
+    export LD_LIBRARY_PATH="$PWD/.heroku/vendor/lib:$LD_LIBRARY_PATH"
+    export GEM_PATH="$PWD/.heroku/ruby/lib/ruby/gems/2.6.0:$PWD/.gem/ruby/2.6.0"
+    export PATH="$PWD/.heroku/ruby/bin:$PATH"
+    exec "$PWD/.heroku/ruby/bin/bundler" "$@"
+  fi
 else
-  # Last resort - find bundler in the Ruby gems
-  BUNDLER_PATH=$(find $HOME/.heroku/ruby -name bundler -type f -executable | head -1)
-  if [ -n "$BUNDLER_PATH" ]; then
-    exec "$BUNDLER_PATH" "$@"
-  else
-    echo "Error: Could not find bundler executable"
-    exit 1
+  # We're in runtime mode
+  if [ -x "$HOME/.heroku/ruby/bin/bundler" ]; then
+    export LD_LIBRARY_PATH="$HOME/.heroku/vendor/lib:$LD_LIBRARY_PATH"
+    export GEM_PATH="$HOME/.heroku/ruby/lib/ruby/gems/2.6.0:$HOME/.gem/ruby/2.6.0"
+    export PATH="$HOME/.heroku/ruby/bin:$PATH"
+    exec "$HOME/.heroku/ruby/bin/bundler" "$@"
   fi
 fi
+
+# Use current directory (for both build and runtime)
+if [ -x ".heroku/ruby/bin/bundler" ]; then
+  export LD_LIBRARY_PATH=".heroku/vendor/lib:$LD_LIBRARY_PATH"
+  export GEM_PATH=".heroku/ruby/lib/ruby/gems/2.6.0:.gem/ruby/2.6.0"
+  export PATH=".heroku/ruby/bin:$PATH"
+  exec ".heroku/ruby/bin/bundler" "$@"
+fi
+
+# Error - couldn't find bundler
+echo "Error: Could not find bundler executable"
+exit 1
 BUNDLEREOF
 chmod +x $BUILD_DIR/bin/bundler
 
 cat > $BUILD_DIR/bin/bundle <<'BUNDLEEOF'
 #!/bin/bash
-# Direct path to Bundler executable
-export LD_LIBRARY_PATH="$HOME/.heroku/vendor/lib:$LD_LIBRARY_PATH"
-export GEM_PATH="$HOME/.heroku/ruby/lib/ruby/gems/2.6.0:$HOME/.gem/ruby/2.6.0"
-export PATH="$HOME/.heroku/ruby/bin:$PATH"
+# Direct path to Bundler executable - use both build-time and runtime paths
 
 # Debug - show what we're running
 echo "Running bundle from $(dirname $0) with args: $@"
 echo "PATH: $PATH"
 echo "Current directory: $(pwd)"
 
-# Try multiple paths for bundle
-if [ -x "$HOME/.heroku/ruby/bin/bundle" ]; then
-  exec "$HOME/.heroku/ruby/bin/bundle" "$@"
-elif [ -x "$HOME/.heroku/ruby/bin/bundler" ]; then
-  exec "$HOME/.heroku/ruby/bin/bundler" "$@"
+# During build, we're in /tmp/build_xxx
+if [[ "$PWD" == "/tmp/build_"* ]]; then
+  # We're in build mode
+  if [ -x "$PWD/.heroku/ruby/bin/bundle" ]; then
+    export LD_LIBRARY_PATH="$PWD/.heroku/vendor/lib:$LD_LIBRARY_PATH"
+    export GEM_PATH="$PWD/.heroku/ruby/lib/ruby/gems/2.6.0:$PWD/.gem/ruby/2.6.0"
+    export PATH="$PWD/.heroku/ruby/bin:$PATH"
+    exec "$PWD/.heroku/ruby/bin/bundle" "$@"
+  elif [ -x "$PWD/.heroku/ruby/bin/bundler" ]; then
+    export LD_LIBRARY_PATH="$PWD/.heroku/vendor/lib:$LD_LIBRARY_PATH"
+    export GEM_PATH="$PWD/.heroku/ruby/lib/ruby/gems/2.6.0:$PWD/.gem/ruby/2.6.0"
+    export PATH="$PWD/.heroku/ruby/bin:$PATH"
+    exec "$PWD/.heroku/ruby/bin/bundler" "$@"
+  fi
 else
-  # Last resort - find bundler in the Ruby gems
-  BUNDLER_PATH=$(find $HOME/.heroku/ruby -name bundler -type f -executable | head -1)
-  if [ -n "$BUNDLER_PATH" ]; then
-    exec "$BUNDLER_PATH" "$@"
-  else
-    echo "Error: Could not find bundle or bundler executable"
-    exit 1
+  # We're in runtime mode
+  if [ -x "$HOME/.heroku/ruby/bin/bundle" ]; then
+    export LD_LIBRARY_PATH="$HOME/.heroku/vendor/lib:$LD_LIBRARY_PATH"
+    export GEM_PATH="$HOME/.heroku/ruby/lib/ruby/gems/2.6.0:$HOME/.gem/ruby/2.6.0"
+    export PATH="$HOME/.heroku/ruby/bin:$PATH"
+    exec "$HOME/.heroku/ruby/bin/bundle" "$@"
+  elif [ -x "$HOME/.heroku/ruby/bin/bundler" ]; then
+    export LD_LIBRARY_PATH="$HOME/.heroku/vendor/lib:$LD_LIBRARY_PATH"
+    export GEM_PATH="$HOME/.heroku/ruby/lib/ruby/gems/2.6.0:$HOME/.gem/ruby/2.6.0"
+    export PATH="$HOME/.heroku/ruby/bin:$PATH"
+    exec "$HOME/.heroku/ruby/bin/bundler" "$@"
   fi
 fi
+
+# Use current directory (for both build and runtime)
+if [ -x ".heroku/ruby/bin/bundle" ]; then
+  export LD_LIBRARY_PATH=".heroku/vendor/lib:$LD_LIBRARY_PATH"
+  export GEM_PATH=".heroku/ruby/lib/ruby/gems/2.6.0:.gem/ruby/2.6.0"
+  export PATH=".heroku/ruby/bin:$PATH"
+  exec ".heroku/ruby/bin/bundle" "$@"
+elif [ -x ".heroku/ruby/bin/bundler" ]; then
+  export LD_LIBRARY_PATH=".heroku/vendor/lib:$LD_LIBRARY_PATH"
+  export GEM_PATH=".heroku/ruby/lib/ruby/gems/2.6.0:.gem/ruby/2.6.0"
+  export PATH=".heroku/ruby/bin:$PATH"
+  exec ".heroku/ruby/bin/bundler" "$@"
+fi
+
+# Show the locations we're checking
+echo "Checking bundler locations:"
+echo "PWD: $PWD"
+echo "Relative: .heroku/ruby/bin/bundle"
+echo "Absolute build: $PWD/.heroku/ruby/bin/bundle"
+echo "Absolute runtime: $HOME/.heroku/ruby/bin/bundle"
+
+# Error - couldn't find bundler
+echo "Error: Could not find bundle or bundler executable"
+exit 1
 BUNDLEEOF
 chmod +x $BUILD_DIR/bin/bundle
 
@@ -210,7 +263,32 @@ $BUILD_DIR/.heroku/ruby/bin/ruby -ropenssl -e 'puts "OpenSSL version: #{OpenSSL:
 if [ -f "$BUILD_DIR/Gemfile" ]; then
   echo "-----> Installing dependencies with Bundler"
   cd $BUILD_DIR
-  $BUILD_DIR/bin/bundle install --without development:test --path vendor/bundle --binstubs vendor/bundle/bin
+  
+  # Create direct reference to bundler for installation
+  cat > $BUILD_DIR/bundler-install.sh <<'INSTALLEREOF'
+#!/bin/bash
+export LD_LIBRARY_PATH="$PWD/.heroku/vendor/lib:$LD_LIBRARY_PATH"
+export GEM_PATH="$PWD/.heroku/ruby/lib/ruby/gems/2.6.0:$PWD/.gem/ruby/2.6.0"
+export PATH="$PWD/.heroku/ruby/bin:$PATH"
+
+# Show debug info
+echo "Running bundler install from $PWD"
+echo "PATH: $PATH"
+echo "Checking for bundler binary:"
+ls -la "$PWD/.heroku/ruby/bin/bundler" || echo "Bundler not found at expected location"
+
+# Directly execute bundler
+if [ -x "$PWD/.heroku/ruby/bin/bundler" ]; then
+  "$PWD/.heroku/ruby/bin/bundler" install --without development:test --path vendor/bundle --binstubs vendor/bundle/bin
+else
+  echo "Bundler executable not found!"
+  exit 1
+fi
+INSTALLEREOF
+  chmod +x $BUILD_DIR/bundler-install.sh
+  
+  # Run the install script
+  $BUILD_DIR/bundler-install.sh
   
   # Ensure proper permissions
   chmod -R +x $BUILD_DIR/vendor/bundle/bin || true
