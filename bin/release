@@ -3,8 +3,5 @@
 cat <<EOF
 ---
 default_process_types:
-  web: bundle exec puma -C config/puma.rb
-  console: bundle exec irb
-addons:
-  - heroku-postgresql
+  web: bundle exec puma -p \$PORT
 EOF

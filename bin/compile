@@ -2,6 +2,8 @@
 
 # Exit on error
 set -e
+# Add verbose debugging
+set -x
 
 BUILD_DIR=$1
 CACHE_DIR=$2
@@ -24,9 +26,9 @@ export CPPPATH=$BUILD_DIR/.heroku/vendor/include:$CPPPATH
 # OpenSSL version to use
 OPENSSL_VERSION="1.1.1w"
 
-echo "-----> Installing dependencies"
-apt-get update -qq
-apt-get install -qq -y libreadline-dev libgdbm-dev libssl-dev libyaml-dev libncurses-dev libffi-dev zlib1g-dev
+echo "-----> Preparing build environment"
+# Heroku already has the necessary development tools and libraries installed
+# We can't run apt-get in the Heroku build environment due to permission restrictions
 
 echo "-----> Compiling OpenSSL ${OPENSSL_VERSION}"
 mkdir -p $BUILD_DIR/.heroku/vendor
@@ -34,7 +36,7 @@ mkdir -p $BUILD_DIR/.heroku/vendor
 # Check if we have a cached copy
 if [ ! -f "$CACHE_DIR/openssl/openssl-${OPENSSL_VERSION}.tar.gz" ]; then
   echo "       Downloading OpenSSL ${OPENSSL_VERSION}"
-  curl -sL "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" -o "$CACHE_DIR/openssl/openssl-${OPENSSL_VERSION}.tar.gz"
+  curl -L "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" -o "$CACHE_DIR/openssl/openssl-${OPENSSL_VERSION}.tar.gz"
 fi
 
 # Extract and compile OpenSSL
@@ -43,9 +45,9 @@ tar xzf "$CACHE_DIR/openssl/openssl-${OPENSSL_VERSION}.tar.gz"
 cd "openssl-${OPENSSL_VERSION}"
 
 echo "       Configuring OpenSSL ${OPENSSL_VERSION}"
-./config --prefix=$BUILD_DIR/.heroku/vendor shared zlib -fPIC
+./config --prefix=$BUILD_DIR/.heroku/vendor shared zlib -fPIC no-async
 echo "       Building OpenSSL ${OPENSSL_VERSION}"
-make -j$(nproc)
+make -j4
 echo "       Installing OpenSSL ${OPENSSL_VERSION}"
 make install_sw
 
@@ -57,7 +59,7 @@ echo "-----> Compiling Ruby ${RUBY_VERSION}"
 # Check if we have a cached copy
 if [ ! -f "$CACHE_DIR/ruby/ruby-${RUBY_VERSION}.tar.gz" ]; then
   echo "       Downloading Ruby ${RUBY_VERSION}"
-  curl -sL "https://cache.ruby-lang.org/pub/ruby/2.6/ruby-${RUBY_VERSION}.tar.gz" -o "$CACHE_DIR/ruby/ruby-${RUBY_VERSION}.tar.gz"
+  curl -L "https://cache.ruby-lang.org/pub/ruby/2.6/ruby-${RUBY_VERSION}.tar.gz" -o "$CACHE_DIR/ruby/ruby-${RUBY_VERSION}.tar.gz"
 fi
 
 # Extract and compile Ruby
@@ -69,10 +71,13 @@ echo "       Configuring Ruby ${RUBY_VERSION}"
 ./configure --prefix=$BUILD_DIR/.heroku/ruby \
   --with-openssl-dir=$BUILD_DIR/.heroku/vendor \
   --disable-install-doc \
-  --enable-shared
+  --enable-shared \
+  --with-out-ext=tk,sdbm,gdbm,dbm \
+  LDFLAGS="-Wl,-rpath,$BUILD_DIR/.heroku/vendor/lib -L$BUILD_DIR/.heroku/vendor/lib" \
+  CPPFLAGS="-I$BUILD_DIR/.heroku/vendor/include"
 
 echo "       Building Ruby ${RUBY_VERSION}"
-make -j$(nproc)
+make -j4
 echo "       Installing Ruby ${RUBY_VERSION}"
 make install
 
@@ -101,6 +106,7 @@ chmod +x $BUILD_DIR/bin/bundle
 
 # Set up environment for runtime
 echo "-----> Setting up runtime environment"
+mkdir -p $BUILD_DIR/.profile.d
 cat > $BUILD_DIR/.profile.d/ruby.sh <<EOF
 #!/bin/bash
 export PATH="\$HOME/bin:\$HOME/.heroku/ruby/bin:\$PATH"
@@ -111,6 +117,8 @@ export GEM_HOME="\$HOME/.gem/ruby/2.6.0"
 export GEM_PATH="\$HOME/.heroku/ruby/lib/ruby/gems/2.6.0:\$HOME/.gem/ruby/2.6.0"
 export SSL_CERT_DIR="/etc/ssl/certs"
 export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
+# Make openssl available at runtime
+export OPENSSL_CONF="\$HOME/.heroku/vendor/ssl/openssl.cnf"
 EOF
 chmod +x $BUILD_DIR/.profile.d/ruby.sh
 
