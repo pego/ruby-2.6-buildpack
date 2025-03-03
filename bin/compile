@@ -179,65 +179,64 @@ chmod +x $BUILD_DIR/bin/bundler
 
 cat > $BUILD_DIR/bin/bundle <<'BUNDLEEOF'
 #!/bin/bash
-# Direct path to Bundler executable - use both build-time and runtime paths
+# Simplified bundle wrapper that has robust error handling
 
 # Debug - show what we're running
 echo "Running bundle from $(dirname $0) with args: $@"
 echo "PATH: $PATH"
 echo "Current directory: $(pwd)"
 
-# During build, we're in /tmp/build_xxx
-if [[ "$PWD" == "/tmp/build_"* ]]; then
-  # We're in build mode
-  if [ -x "$PWD/.heroku/ruby/bin/bundle" ]; then
-    export LD_LIBRARY_PATH="$PWD/.heroku/vendor/lib:$LD_LIBRARY_PATH"
-    export GEM_PATH="$PWD/.heroku/ruby/lib/ruby/gems/2.6.0:$PWD/.gem/ruby/2.6.0"
-    export PATH="$PWD/.heroku/ruby/bin:$PATH"
-    exec "$PWD/.heroku/ruby/bin/bundle" "$@"
-  elif [ -x "$PWD/.heroku/ruby/bin/bundler" ]; then
-    export LD_LIBRARY_PATH="$PWD/.heroku/vendor/lib:$LD_LIBRARY_PATH"
-    export GEM_PATH="$PWD/.heroku/ruby/lib/ruby/gems/2.6.0:$PWD/.gem/ruby/2.6.0"
-    export PATH="$PWD/.heroku/ruby/bin:$PATH"
-    exec "$PWD/.heroku/ruby/bin/bundler" "$@"
-  fi
+# Set up environment
+export LD_LIBRARY_PATH="$PWD/.heroku/vendor/lib:$LD_LIBRARY_PATH"
+export GEM_PATH="$PWD/.heroku/ruby/lib/ruby/gems/2.6.0:$PWD/.gem/ruby/2.6.0"
+export PATH="$PWD/.heroku/ruby/bin:$PATH"
+
+# Look for bundler executable in Gem directory
+BUNDLER_GEM_PATH=$(find $PWD/.heroku/ruby/lib/ruby/gems -name bundler -type f -executable -print 2>/dev/null | head -1 || echo "")
+BUNDLE_GEM_PATH=$(find $PWD/.heroku/ruby/lib/ruby/gems -name bundle -type f -executable -print 2>/dev/null | head -1 || echo "")
+
+# Directly run vendor bundle if available
+if [ -x "$PWD/vendor/bundle/bin/bundle" ]; then
+  echo "Using vendor bundle: $PWD/vendor/bundle/bin/bundle"
+  exec "$PWD/vendor/bundle/bin/bundle" "$@"
+# Try standard paths
+elif [ -x "$PWD/.heroku/ruby/bin/bundle" ]; then
+  echo "Using local bundle: $PWD/.heroku/ruby/bin/bundle"
+  exec "$PWD/.heroku/ruby/bin/bundle" "$@"
+elif [ -x "$PWD/.heroku/ruby/bin/bundler" ]; then
+  echo "Using local bundler: $PWD/.heroku/ruby/bin/bundler"
+  exec "$PWD/.heroku/ruby/bin/bundler" "$@"
+# Try gem paths
+elif [ -n "$BUNDLE_GEM_PATH" ]; then
+  echo "Using gem bundle: $BUNDLE_GEM_PATH"
+  exec "$BUNDLE_GEM_PATH" "$@"
+elif [ -n "$BUNDLER_GEM_PATH" ]; then
+  echo "Using gem bundler: $BUNDLER_GEM_PATH"
+  exec "$BUNDLER_GEM_PATH" "$@"
+# Try calling bundler directly if in PATH
+elif command -v bundle >/dev/null 2>&1; then
+  echo "Using bundle from PATH"
+  exec bundle "$@"
+elif command -v bundler >/dev/null 2>&1; then
+  echo "Using bundler from PATH"
+  exec bundler "$@"
+# If all else fails, let's create a fake bundler that can at least handle 'exec'
 else
-  # We're in runtime mode
-  if [ -x "$HOME/.heroku/ruby/bin/bundle" ]; then
-    export LD_LIBRARY_PATH="$HOME/.heroku/vendor/lib:$LD_LIBRARY_PATH"
-    export GEM_PATH="$HOME/.heroku/ruby/lib/ruby/gems/2.6.0:$HOME/.gem/ruby/2.6.0"
-    export PATH="$HOME/.heroku/ruby/bin:$PATH"
-    exec "$HOME/.heroku/ruby/bin/bundle" "$@"
-  elif [ -x "$HOME/.heroku/ruby/bin/bundler" ]; then
-    export LD_LIBRARY_PATH="$HOME/.heroku/vendor/lib:$LD_LIBRARY_PATH"
-    export GEM_PATH="$HOME/.heroku/ruby/lib/ruby/gems/2.6.0:$HOME/.gem/ruby/2.6.0"
-    export PATH="$HOME/.heroku/ruby/bin:$PATH"
-    exec "$HOME/.heroku/ruby/bin/bundler" "$@"
+  # If this is a simple exec command, we can try to run the command directly
+  if [ "$1" = "exec" ]; then
+    shift
+    echo "*** WARNING: No bundler found, attempting to run command directly: $@"
+    exec "$@"
+  else
+    echo "Error: Could not find bundle or bundler. Checked:"
+    echo "- $PWD/vendor/bundle/bin/bundle"
+    echo "- $PWD/.heroku/ruby/bin/bundle"
+    echo "- $PWD/.heroku/ruby/bin/bundler"
+    echo "- Gem paths in $PWD/.heroku/ruby/lib/ruby/gems"
+    echo "- system bundle and bundler in PATH"
+    exit 1
   fi
 fi
-
-# Use current directory (for both build and runtime)
-if [ -x ".heroku/ruby/bin/bundle" ]; then
-  export LD_LIBRARY_PATH=".heroku/vendor/lib:$LD_LIBRARY_PATH"
-  export GEM_PATH=".heroku/ruby/lib/ruby/gems/2.6.0:.gem/ruby/2.6.0"
-  export PATH=".heroku/ruby/bin:$PATH"
-  exec ".heroku/ruby/bin/bundle" "$@"
-elif [ -x ".heroku/ruby/bin/bundler" ]; then
-  export LD_LIBRARY_PATH=".heroku/vendor/lib:$LD_LIBRARY_PATH"
-  export GEM_PATH=".heroku/ruby/lib/ruby/gems/2.6.0:.gem/ruby/2.6.0"
-  export PATH=".heroku/ruby/bin:$PATH"
-  exec ".heroku/ruby/bin/bundler" "$@"
-fi
-
-# Show the locations we're checking
-echo "Checking bundler locations:"
-echo "PWD: $PWD"
-echo "Relative: .heroku/ruby/bin/bundle"
-echo "Absolute build: $PWD/.heroku/ruby/bin/bundle"
-echo "Absolute runtime: $HOME/.heroku/ruby/bin/bundle"
-
-# Error - couldn't find bundler
-echo "Error: Could not find bundle or bundler executable"
-exit 1
 BUNDLEEOF
 chmod +x $BUILD_DIR/bin/bundle
 
@@ -298,10 +297,49 @@ INSTALLEREOF
   touch $BUILD_DIR/log/production.log
 fi
 
+# Create a symbolic link to bundler for puma
+echo "-----> Creating additional wrappers"
+mkdir -p $BUILD_DIR/vendor/bundle/bin
+cat > $BUILD_DIR/vendor/bundle/bin/puma <<'PUMAEOF'
+#!/bin/bash
+export LD_LIBRARY_PATH="$PWD/.heroku/vendor/lib:$LD_LIBRARY_PATH"
+export GEM_PATH="$PWD/.heroku/ruby/lib/ruby/gems/2.6.0:$PWD/.gem/ruby/2.6.0"
+export PATH="$PWD/.heroku/ruby/bin:$PATH"
+
+# Look for puma executable
+if [ -x "$PWD/vendor/bundle/bin/puma.ruby" ]; then
+  exec "$PWD/vendor/bundle/bin/puma.ruby" "$@"
+else
+  # Try to find puma in gem paths
+  PUMA_PATH=$(find $PWD/.heroku/ruby -name puma -type f -executable -print 2>/dev/null | head -1 || echo "")
+  if [ -n "$PUMA_PATH" ]; then
+    exec "$PUMA_PATH" "$@"
+  elif command -v puma >/dev/null 2>&1; then
+    exec puma "$@"
+  else
+    echo "Error: Could not find puma"
+    exit 1
+  fi
+fi
+PUMAEOF
+chmod +x $BUILD_DIR/vendor/bundle/bin/puma
+
+# Update the release script to use our wrapper
+cat > $BUILD_DIR/run-puma.sh <<'RUNEOF'
+#!/bin/bash
+# Run puma directly with the correct paths
+export LD_LIBRARY_PATH="$PWD/.heroku/vendor/lib:$LD_LIBRARY_PATH"
+export GEM_PATH="$PWD/.heroku/ruby/lib/ruby/gems/2.6.0:$PWD/.gem/ruby/2.6.0"
+export PATH="$PWD/.heroku/ruby/bin:$PATH"
+exec puma -p ${PORT:-5000}
+RUNEOF
+chmod +x $BUILD_DIR/run-puma.sh
+
 # Clean up build artifacts to reduce slug size
 echo "-----> Cleaning up build artifacts"
 cd $BUILD_DIR
 rm -rf "openssl-${OPENSSL_VERSION}"
 rm -rf "ruby-${RUBY_VERSION}"
+rm -f bundler-install.sh
 
 echo "-----> Ruby ${RUBY_VERSION} with OpenSSL ${OPENSSL_VERSION} installed successfully"
