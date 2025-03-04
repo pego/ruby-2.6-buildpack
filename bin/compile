@@ -372,75 +372,100 @@ fi
 PUMAEOF
 chmod +x $BUILD_DIR/vendor/bundle/bin/puma
 
-# We need to install puma first
-echo "-----> Installing Puma gem"
+# Install essential gems including webrick (not included in Ruby 3.0+)
+echo "-----> Installing essential gems"
 cd $BUILD_DIR
+$BUILD_DIR/.heroku/ruby/bin/gem install webrick --no-document
 $BUILD_DIR/.heroku/ruby/bin/gem install puma --no-document
+$BUILD_DIR/.heroku/ruby/bin/gem install rack --no-document
+
+# Install rackup
+echo "-----> Installing rackup"
+$BUILD_DIR/.heroku/ruby/bin/gem install rackup --no-document
+
+# Create basic server script as a Ruby file
+cat > $BUILD_DIR/simple_server.rb <<'SERVEREOF'
+# Simple HTTP server using Ruby's built-in webrick library
+require 'webrick'
+
+# Create a server on the PORT environment variable (default to 5000)
+port = ENV['PORT'] || 5000
+puts "Starting server on port #{port}"
+
+# Create a basic HTTP server
+server = WEBrick::HTTPServer.new(
+  :Port => port.to_i,
+  :DocumentRoot => '.'
+)
+
+# Add a handler for the root path
+server.mount_proc '/' do |req, res|
+  res.body = "Hello from Ruby #{RUBY_VERSION}! The server is working."
+  res.content_type = 'text/html'
+  puts "Handled request: #{req.path}"
+end
+
+# Add handlers for other paths for debugging
+server.mount_proc '/info' do |req, res|
+  res.body = "<pre>Ruby version: #{RUBY_VERSION}\n"
+  res.body += "Gems: #{Gem.loaded_specs.keys.join(', ')}\n"
+  res.body += "ENV: #{ENV.inspect}</pre>"
+  res.content_type = 'text/html'
+end
+
+# Graceful shutdown
+trap('INT') { server.shutdown }
+trap('TERM') { server.shutdown }
+
+# Start the server
+puts "Server is ready to accept connections"
+server.start
+SERVEREOF
 
 # Update the release script to use our wrapper
-cat > $BUILD_DIR/run-puma.sh <<'RUNEOF'
+cat > $BUILD_DIR/run-server.sh <<'RUNEOF'
 #!/bin/bash
-# Run puma directly with the correct paths
+# Simple server startup script
 
-# Fix shared library paths - CRITICAL for Ruby to work
+# Essential environment variables
+export RUBYOPT="-W0"  # Suppress warnings
+export RUBYLIB="$PWD/.heroku/ruby/lib/ruby/2.6.0:$PWD/.heroku/ruby/lib/ruby/2.6.0/x86_64-linux"
 export LD_LIBRARY_PATH="$PWD/.heroku/ruby/lib:$PWD/.heroku/vendor/lib:$LD_LIBRARY_PATH"
 export GEM_PATH="$PWD/.heroku/ruby/lib/ruby/gems/2.6.0:$PWD/.gem/ruby/2.6.0"
+export GEM_HOME="$PWD/.gem/ruby/2.6.0"
 export PATH="$PWD/.heroku/ruby/bin:$PATH"
+export RUBY_COMPAT_VERSION="2.6.0"
 
 # Debug info
-echo "Looking for shared libraries:"
-ls -la $PWD/.heroku/ruby/lib/libruby* || echo "No libruby.so found!"
+echo "Ruby environment debug info:"
 echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
+echo "GEM_PATH: $GEM_PATH"
+echo "GEM_HOME: $GEM_HOME"
+echo "RUBYLIB: $RUBYLIB"
 
-echo "Looking for puma in:"
-echo "PATH: $PATH"
-echo "Current directory: $PWD"
-find $PWD/.heroku/ruby -name puma -type f -executable -print 2>/dev/null || echo "No puma found in ruby dirs"
-find $PWD/vendor -name puma -type f -executable -print 2>/dev/null || echo "No puma found in vendor"
-
-# Try running directly using ruby with absolute path to libraries
-if [ -x "$PWD/.heroku/ruby/bin/ruby" ] && [ -f "$PWD/.heroku/ruby/lib/libruby.so.2.6" ]; then
-  echo "Found ruby and libraries, running puma directly through ruby..."
+# Try to run the main application
+if [ -f "$PWD/config.ru" ]; then
+  echo "Found config.ru, attempting to start the application"
   
-  # Try to find puma in various locations
-  if [ -f "$PWD/vendor/bundle/bin/puma" ]; then
-    $PWD/.heroku/ruby/bin/ruby $PWD/vendor/bundle/bin/puma -p ${PORT:-5000}
-  elif [ -f "$PWD/.heroku/ruby/bin/puma" ]; then
-    $PWD/.heroku/ruby/bin/ruby $PWD/.heroku/ruby/bin/puma -p ${PORT:-5000}
+  # Check if we have rackup
+  if [ -x "$PWD/.heroku/ruby/bin/rackup" ]; then
+    # Try to run rackup directly
+    echo "Using rackup to start the application"
+    exec "$PWD/.heroku/ruby/bin/rackup" -p "${PORT:-5000}" -E production -o 0.0.0.0
   else
-    # Search for puma in gem paths
-    PUMA_PATH=$(find $PWD/.heroku/ruby -name puma -type f -print 2>/dev/null | head -1)
-    if [ -n "$PUMA_PATH" ]; then
-      echo "Found puma at $PUMA_PATH"
-      $PWD/.heroku/ruby/bin/ruby $PUMA_PATH -p ${PORT:-5000}
-    else
-      echo "Error: Could not find puma script"
-      exit 1
+    # Try using Puma directly
+    if [ -x "$PWD/vendor/bundle/bin/puma" ]; then
+      echo "Using puma to start the application"
+      exec "$PWD/vendor/bundle/bin/puma" -p "${PORT:-5000}" -C "$PWD/config/puma.rb"
     fi
   fi
-else
-  echo "Creating minimal Rack application..."
-  mkdir -p $PWD/tmp_app
-  
-  # Create a minimal Rack application
-  cat > $PWD/tmp_app/config.ru <<'RACKEOF'
-  app = proc do |env|
-    puts "Handling request: #{env['REQUEST_PATH']}"
-    [200, {'Content-Type' => 'text/html'}, ["Hello from Ruby #{RUBY_VERSION}"]]
-  end
-  
-  run app
-RACKEOF
-  
-  # Run rackup directly
-  echo "Starting minimal rack app..."
-  cd $PWD/tmp_app
-  
-  # Try running through the direct Ruby path
-  LD_PRELOAD=$PWD/.heroku/ruby/lib/libruby.so.2.6 \
-  $PWD/.heroku/ruby/bin/ruby -rwebrick -e "server = WEBrick::HTTPServer.new(:Port => ${PORT:-5000}, :DocumentRoot => '.'); server.mount_proc('/') { |req, res| res.body = 'Hello from Ruby #{RUBY_VERSION}' }; trap('INT') { server.shutdown }; server.start"
 fi
+
+# If we get here, fall back to the simple server
+echo "Starting simple webrick server"
+exec "$PWD/.heroku/ruby/bin/ruby" "$PWD/simple_server.rb"
 RUNEOF
+chmod +x $BUILD_DIR/run-server.sh
 chmod +x $BUILD_DIR/run-puma.sh
 
 # Clean up build artifacts to reduce slug size
