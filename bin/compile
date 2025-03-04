@@ -226,6 +226,27 @@ else
   if [ "$1" = "exec" ]; then
     shift
     echo "*** WARNING: No bundler found, attempting to run command directly: $@"
+    
+    # Special case for puma
+    if [ "$1" = "puma" ]; then
+      shift
+      echo "Detected puma command, searching for puma executable..."
+      
+      # Try to find puma in various locations
+      if [ -x "$PWD/vendor/bundle/bin/puma" ]; then
+        exec "$PWD/vendor/bundle/bin/puma" "$@"
+      elif [ -x "$PWD/.heroku/ruby/bin/puma" ]; then
+        exec "$PWD/.heroku/ruby/bin/puma" "$@"
+      else
+        # Search for puma in gem paths
+        PUMA_PATH=$(find $PWD/.heroku/ruby -name puma -type f -executable -print 2>/dev/null | head -1)
+        if [ -n "$PUMA_PATH" ]; then
+          echo "Found puma at $PUMA_PATH"
+          exec "$PUMA_PATH" "$@"
+        fi
+      fi
+    fi
+    
     exec "$@"
   else
     echo "Error: Could not find bundle or bundler. Checked:"
@@ -258,10 +279,17 @@ echo "-----> Verifying installation"
 $BUILD_DIR/.heroku/ruby/bin/ruby -v
 $BUILD_DIR/.heroku/ruby/bin/ruby -ropenssl -e 'puts "OpenSSL version: #{OpenSSL::OPENSSL_VERSION}"'
 
-# Install Rails app dependencies if there's a Gemfile
+# Install gems for Rails app if there's a Gemfile
 if [ -f "$BUILD_DIR/Gemfile" ]; then
   echo "-----> Installing dependencies with Bundler"
   cd $BUILD_DIR
+  
+  # First install critical gems directly
+  echo "-----> Ensuring critical gems are installed"
+  $BUILD_DIR/.heroku/ruby/bin/gem install bundler -v 2.3.26 --no-document
+  $BUILD_DIR/.heroku/ruby/bin/gem install rake --no-document
+  $BUILD_DIR/.heroku/ruby/bin/gem install rack --no-document
+  $BUILD_DIR/.heroku/ruby/bin/gem install puma --no-document
   
   # Create direct reference to bundler for installation
   cat > $BUILD_DIR/bundler-install.sh <<'INSTALLEREOF'
@@ -281,7 +309,19 @@ if [ -x "$PWD/.heroku/ruby/bin/bundler" ]; then
   "$PWD/.heroku/ruby/bin/bundler" install --without development:test --path vendor/bundle --binstubs vendor/bundle/bin
 else
   echo "Bundler executable not found!"
-  exit 1
+  # Try to install gems directly
+  echo "Attempting to install gems directly from Gemfile..."
+  if [ -f Gemfile ]; then
+    # Extract gem names from Gemfile and install them
+    echo "Installing gems from Gemfile directly..."
+    cat Gemfile | grep -E "^\s*gem\s+['\"]([^'\"]+)['\"]" | sed -E "s/^\s*gem\s+['\"]([^'\"]+)['\"](.*)/\1/g" | while read -r gem_name; do
+      echo "Installing $gem_name directly..."
+      "$PWD/.heroku/ruby/bin/gem" install "$gem_name" --no-document
+    done
+  else
+    echo "No Gemfile found, cannot install gems"
+    exit 1
+  fi
 fi
 INSTALLEREOF
   chmod +x $BUILD_DIR/bundler-install.sh
@@ -297,7 +337,7 @@ INSTALLEREOF
   touch $BUILD_DIR/log/production.log
 fi
 
-# Create a symbolic link to bundler for puma
+# Create a direct puma launcher
 echo "-----> Creating additional wrappers"
 mkdir -p $BUILD_DIR/vendor/bundle/bin
 cat > $BUILD_DIR/vendor/bundle/bin/puma <<'PUMAEOF'
@@ -324,6 +364,11 @@ fi
 PUMAEOF
 chmod +x $BUILD_DIR/vendor/bundle/bin/puma
 
+# We need to install puma first
+echo "-----> Installing Puma gem"
+cd $BUILD_DIR
+$BUILD_DIR/.heroku/ruby/bin/gem install puma --no-document
+
 # Update the release script to use our wrapper
 cat > $BUILD_DIR/run-puma.sh <<'RUNEOF'
 #!/bin/bash
@@ -331,7 +376,41 @@ cat > $BUILD_DIR/run-puma.sh <<'RUNEOF'
 export LD_LIBRARY_PATH="$PWD/.heroku/vendor/lib:$LD_LIBRARY_PATH"
 export GEM_PATH="$PWD/.heroku/ruby/lib/ruby/gems/2.6.0:$PWD/.gem/ruby/2.6.0"
 export PATH="$PWD/.heroku/ruby/bin:$PATH"
-exec puma -p ${PORT:-5000}
+
+# Debug info
+echo "Looking for puma in:"
+echo "PATH: $PATH"
+echo "Current directory: $PWD"
+find $PWD/.heroku/ruby -name puma -type f -executable -print 2>/dev/null || echo "No puma found in ruby dirs"
+find $PWD/vendor -name puma -type f -executable -print 2>/dev/null || echo "No puma found in vendor"
+
+# Try to find puma in various locations
+if [ -x "$PWD/vendor/bundle/bin/puma" ]; then
+  exec "$PWD/vendor/bundle/bin/puma" -p ${PORT:-5000}
+elif [ -x "$PWD/.heroku/ruby/bin/puma" ]; then
+  exec "$PWD/.heroku/ruby/bin/puma" -p ${PORT:-5000}
+else
+  # Search for puma in gem paths
+  PUMA_PATH=$(find $PWD/.heroku/ruby -name puma -type f -executable -print 2>/dev/null | head -1)
+  if [ -n "$PUMA_PATH" ]; then
+    echo "Found puma at $PUMA_PATH"
+    exec "$PUMA_PATH" -p ${PORT:-5000}
+  else
+    echo "Error: Could not find puma executable"
+    echo "Attempting to install puma gem at runtime..."
+    "$PWD/.heroku/ruby/bin/gem" install puma --no-document
+    
+    # Try again to find puma
+    PUMA_PATH=$(find $PWD/.heroku/ruby -name puma -type f -executable -print 2>/dev/null | head -1)
+    if [ -n "$PUMA_PATH" ]; then
+      echo "Found puma at $PUMA_PATH"
+      exec "$PUMA_PATH" -p ${PORT:-5000}
+    else
+      echo "Fatal error: Could not install or find puma"
+      exit 1
+    fi
+  fi
+fi
 RUNEOF
 chmod +x $BUILD_DIR/run-puma.sh
 
