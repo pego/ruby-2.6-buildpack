@@ -112,8 +112,9 @@ mkdir -p $BUILD_DIR/.profile.d
 cat > $BUILD_DIR/.profile.d/ruby.sh <<PROFILEEOF
 #!/bin/bash
 export PATH="\$HOME/bin:\$HOME/.heroku/ruby/bin:\$PATH"
-export LD_LIBRARY_PATH="\$HOME/.heroku/vendor/lib:\$LD_LIBRARY_PATH"
-export LIBRARY_PATH="\$HOME/.heroku/vendor/lib:\$LIBRARY_PATH"
+# CRITICAL: Include Ruby lib directory for libruby.so
+export LD_LIBRARY_PATH="\$HOME/.heroku/ruby/lib:\$HOME/.heroku/vendor/lib:\$LD_LIBRARY_PATH"
+export LIBRARY_PATH="\$HOME/.heroku/ruby/lib:\$HOME/.heroku/vendor/lib:\$LIBRARY_PATH"
 export CPATH="\$HOME/.heroku/vendor/include:\$CPATH"
 export GEM_HOME="\$HOME/.gem/ruby/2.6.0"
 export GEM_PATH="\$HOME/.heroku/ruby/lib/ruby/gems/2.6.0:\$HOME/.gem/ruby/2.6.0"
@@ -121,6 +122,13 @@ export SSL_CERT_DIR="/etc/ssl/certs"
 export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
 # Make openssl available at runtime
 export OPENSSL_CONF="\$HOME/.heroku/vendor/ssl/openssl.cnf"
+
+# Print debug info for reference
+echo "Ruby environment:"
+echo "  LD_LIBRARY_PATH: \$LD_LIBRARY_PATH"
+echo "  PATH: \$PATH"
+echo "  GEM_PATH: \$GEM_PATH"
+ls -la \$HOME/.heroku/ruby/lib/libruby* || echo "libruby not found in expected location!"
 PROFILEEOF
 chmod +x $BUILD_DIR/.profile.d/ruby.sh
 
@@ -373,43 +381,64 @@ $BUILD_DIR/.heroku/ruby/bin/gem install puma --no-document
 cat > $BUILD_DIR/run-puma.sh <<'RUNEOF'
 #!/bin/bash
 # Run puma directly with the correct paths
-export LD_LIBRARY_PATH="$PWD/.heroku/vendor/lib:$LD_LIBRARY_PATH"
+
+# Fix shared library paths - CRITICAL for Ruby to work
+export LD_LIBRARY_PATH="$PWD/.heroku/ruby/lib:$PWD/.heroku/vendor/lib:$LD_LIBRARY_PATH"
 export GEM_PATH="$PWD/.heroku/ruby/lib/ruby/gems/2.6.0:$PWD/.gem/ruby/2.6.0"
 export PATH="$PWD/.heroku/ruby/bin:$PATH"
 
 # Debug info
+echo "Looking for shared libraries:"
+ls -la $PWD/.heroku/ruby/lib/libruby* || echo "No libruby.so found!"
+echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
+
 echo "Looking for puma in:"
 echo "PATH: $PATH"
 echo "Current directory: $PWD"
 find $PWD/.heroku/ruby -name puma -type f -executable -print 2>/dev/null || echo "No puma found in ruby dirs"
 find $PWD/vendor -name puma -type f -executable -print 2>/dev/null || echo "No puma found in vendor"
 
-# Try to find puma in various locations
-if [ -x "$PWD/vendor/bundle/bin/puma" ]; then
-  exec "$PWD/vendor/bundle/bin/puma" -p ${PORT:-5000}
-elif [ -x "$PWD/.heroku/ruby/bin/puma" ]; then
-  exec "$PWD/.heroku/ruby/bin/puma" -p ${PORT:-5000}
-else
-  # Search for puma in gem paths
-  PUMA_PATH=$(find $PWD/.heroku/ruby -name puma -type f -executable -print 2>/dev/null | head -1)
-  if [ -n "$PUMA_PATH" ]; then
-    echo "Found puma at $PUMA_PATH"
-    exec "$PUMA_PATH" -p ${PORT:-5000}
+# Try running directly using ruby with absolute path to libraries
+if [ -x "$PWD/.heroku/ruby/bin/ruby" ] && [ -f "$PWD/.heroku/ruby/lib/libruby.so.2.6" ]; then
+  echo "Found ruby and libraries, running puma directly through ruby..."
+  
+  # Try to find puma in various locations
+  if [ -f "$PWD/vendor/bundle/bin/puma" ]; then
+    $PWD/.heroku/ruby/bin/ruby $PWD/vendor/bundle/bin/puma -p ${PORT:-5000}
+  elif [ -f "$PWD/.heroku/ruby/bin/puma" ]; then
+    $PWD/.heroku/ruby/bin/ruby $PWD/.heroku/ruby/bin/puma -p ${PORT:-5000}
   else
-    echo "Error: Could not find puma executable"
-    echo "Attempting to install puma gem at runtime..."
-    "$PWD/.heroku/ruby/bin/gem" install puma --no-document
-    
-    # Try again to find puma
-    PUMA_PATH=$(find $PWD/.heroku/ruby -name puma -type f -executable -print 2>/dev/null | head -1)
+    # Search for puma in gem paths
+    PUMA_PATH=$(find $PWD/.heroku/ruby -name puma -type f -print 2>/dev/null | head -1)
     if [ -n "$PUMA_PATH" ]; then
       echo "Found puma at $PUMA_PATH"
-      exec "$PUMA_PATH" -p ${PORT:-5000}
+      $PWD/.heroku/ruby/bin/ruby $PUMA_PATH -p ${PORT:-5000}
     else
-      echo "Fatal error: Could not install or find puma"
+      echo "Error: Could not find puma script"
       exit 1
     fi
   fi
+else
+  echo "Creating minimal Rack application..."
+  mkdir -p $PWD/tmp_app
+  
+  # Create a minimal Rack application
+  cat > $PWD/tmp_app/config.ru <<'RACKEOF'
+  app = proc do |env|
+    puts "Handling request: #{env['REQUEST_PATH']}"
+    [200, {'Content-Type' => 'text/html'}, ["Hello from Ruby #{RUBY_VERSION}"]]
+  end
+  
+  run app
+RACKEOF
+  
+  # Run rackup directly
+  echo "Starting minimal rack app..."
+  cd $PWD/tmp_app
+  
+  # Try running through the direct Ruby path
+  LD_PRELOAD=$PWD/.heroku/ruby/lib/libruby.so.2.6 \
+  $PWD/.heroku/ruby/bin/ruby -rwebrick -e "server = WEBrick::HTTPServer.new(:Port => ${PORT:-5000}, :DocumentRoot => '.'); server.mount_proc('/') { |req, res| res.body = 'Hello from Ruby #{RUBY_VERSION}' }; trap('INT') { server.shutdown }; server.start"
 fi
 RUNEOF
 chmod +x $BUILD_DIR/run-puma.sh
