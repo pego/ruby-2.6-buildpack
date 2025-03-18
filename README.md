@@ -1,4 +1,4 @@
-# Ruby 2.6.10 Buildpack for Heroku
+# Ruby 2.6.10 Buildpack for Heroku.com
 
 This custom buildpack compiles Ruby 2.6.10 with OpenSSL 1.1.1 from source on Heroku during deployment.
 
