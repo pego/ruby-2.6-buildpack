@@ -49,4 +49,4 @@ MIT License
 
 ## Author
 
-Massimo Pegoraro - massimo.pego@gmail.com
+Massimo Pegoraro - hello@pego.tech
