@@ -46,3 +46,7 @@ If you encounter issues:
 ## License
 
 MIT License
+
+## Author
+
+Massimo Pegoraro
